@@ -366,6 +366,62 @@ impl Gerencianet {
             }
         }
     }
+
+    pub async fn register_web_hook(&self, webhook_url: String) -> Result<(), GerencianetError> {
+        let access_token = self.get_access_token().await?;
+        #[derive(Deserialize, Debug)]
+        struct WebhookResponse {
+            #[serde(rename = "webhookUrl")]
+            webhook_url: String,
+        }
+        let result = self
+            .client
+            .get(format!("{0}/v2/webhook/{1}", self.url, self.pix_key))
+            .bearer_auth(&access_token)
+            .send()
+            .await?;
+        let response_str = result.text().await?;
+        let response = match serde_json::from_str::<WebhookResponse>(&response_str) {
+            Ok(r) => r,
+            Err(_) => {
+                return match serde_json::from_str::<GerencianetResponseError>(&response_str) {
+                    Ok(err) => Err(GerencianetError::ResponseError(err)),
+                    Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                }
+            }
+        };
+
+        if response.webhook_url == webhook_url {
+            return Ok(());
+        }
+
+        let result = self
+            .client
+            .put(format!("{0}/v2/webhook/{1}", self.url, self.pix_key))
+            .bearer_auth(&access_token)
+            .json(&json!({
+                "webhookUrl": webhook_url,
+            }))
+            .send()
+            .await?;
+        let response_str = result.text().await?;
+        let response = match serde_json::from_str::<WebhookResponse>(&response_str) {
+            Ok(r) => r,
+            Err(_) => {
+                return match serde_json::from_str::<GerencianetResponseError>(&response_str) {
+                    Ok(err) => Err(GerencianetError::ResponseError(err)),
+                    Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                }
+            }
+        };
+        if response.webhook_url != webhook_url {
+            return Err(GerencianetError::ContractError(
+                "Gerencianet returned a different webhook url".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -600,4 +656,32 @@ async fn test_cancel() {
         .unwrap();
     let cancelled = gn.cancel_charge(txid.as_str()).await.unwrap();
     assert_eq!(cancelled.status, "REMOVIDA_PELO_USUARIO_RECEBEDOR");
+}
+
+#[tokio::test]
+async fn test_webhook() {
+    let client_id = std::env::var("GERENCIANET_CLIENT_ID")
+        .expect("GERENCIANET_CLIENT_ID env variable is not set");
+    let client_secret = std::env::var("GERENCIANET_CLIENT_SECRET")
+        .expect("GERENCIANET_CLIENT_SECRET env variable is not set");
+    let pix_key =
+        std::env::var("GERENCIANET_PIX_KEY").expect("GERENCIANET_PIX_KEY env variable is not set");
+    let url = std::env::var("GERENCIANET_URL").expect("GERENCIANET_URL env variable is not set");
+    let der_base64 = std::env::var("GERENCIANET_KEY_BASE64")
+        .expect("GERENCIANET_KEY_BASE64 env variable is not set");
+    let der_password = std::env::var("GERENCIANET_KEY_PASSWORD")
+        .expect("GERENCIANET_KEY_PASSWORD env variable is not set");
+    let webhook_url = std::env::var("GERENCIANET_WEBHOOK_URL")
+        .expect("GERENCIANET_WEBHOOK_URL env variable is not set");
+
+    let gn = Gerencianet::new(
+        client_id,
+        client_secret,
+        url,
+        pix_key,
+        der_base64,
+        der_password,
+    );
+    let res = gn.register_web_hook(webhook_url).await;
+    assert!(res.is_ok());
 }
