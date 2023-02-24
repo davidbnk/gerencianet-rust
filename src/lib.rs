@@ -367,7 +367,7 @@ impl Gerencianet {
         }
     }
 
-    pub async fn register_web_hook(&self, webhook_url: String) -> Result<(), GerencianetError> {
+    pub async fn register_web_hook(&self, webhook_url: &str) -> Result<(), GerencianetError> {
         let access_token = self.get_access_token().await?;
         #[derive(Deserialize, Debug)]
         struct WebhookResponse {
@@ -682,6 +682,6 @@ async fn test_webhook() {
         der_base64,
         der_password,
     );
-    let res = gn.register_web_hook(webhook_url).await;
+    let res = gn.register_web_hook(&webhook_url).await;
     assert!(res.is_ok());
 }
