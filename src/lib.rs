@@ -5,6 +5,8 @@ use reqwest::header;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::Display;
 use tokio::sync::Mutex;
 
 #[derive(Debug)]
@@ -105,6 +107,26 @@ pub enum GerencianetError {
     ContractError(String),
     ResponseError(GerencianetResponseError),
     ResponseParseError(String),
+}
+
+impl Display for GerencianetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RequestError(e) => write!(f, "GerencianetError::RequestError: {}", e),
+            Self::ContractError(e) => write!(f, "GerencianetError::ContractError: {}", e),
+            Self::ResponseError(e) => write!(f, "GerencianetError::ResponseError: {}", e.mensagem),
+            Self::ResponseParseError(e) => write!(f, "GerencianetError::ResponseParseError: {}", e),
+        }
+    }
+}
+
+impl Error for GerencianetError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::RequestError(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
