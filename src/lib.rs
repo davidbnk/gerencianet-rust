@@ -114,7 +114,11 @@ impl Display for GerencianetError {
         match self {
             Self::RequestError(e) => write!(f, "GerencianetError::RequestError: {}", e),
             Self::ContractError(e) => write!(f, "GerencianetError::ContractError: {}", e),
-            Self::ResponseError(e) => write!(f, "GerencianetError::ResponseError: {}", e.mensagem),
+            Self::ResponseError(e) => write!(
+                f,
+                "GerencianetError::ResponseError: {0} ({1})",
+                e.nome, e.mensagem
+            ),
             Self::ResponseParseError(e) => write!(f, "GerencianetError::ResponseParseError: {}", e),
         }
     }
