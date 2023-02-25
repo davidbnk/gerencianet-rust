@@ -106,7 +106,7 @@ pub enum GerencianetError {
     RequestError(reqwest::Error),
     ContractError(String),
     ResponseError(GerencianetResponseError),
-    ResponseParseError(String),
+    ResponseParseError(String, serde_json::Error),
 }
 
 impl Display for GerencianetError {
@@ -119,7 +119,11 @@ impl Display for GerencianetError {
                 "GerencianetError::ResponseError: {0} ({1})",
                 e.nome, e.mensagem
             ),
-            Self::ResponseParseError(e) => write!(f, "GerencianetError::ResponseParseError: {}", e),
+            Self::ResponseParseError(body, err) => write!(
+                f,
+                "GerencianetError::ResponseParseError: \"{}\" for body: \"{}\"",
+                err, body
+            ),
         }
     }
 }
@@ -193,20 +197,26 @@ impl Gerencianet {
         }
         let auth =
             general_purpose::STANDARD.encode(format!("{}:{}", self.client_id, self.client_secret));
-        let result = self
+        let response = self
             .client
             .post(format!("{0}/oauth/token", self.url))
             .header("Authorization", format!("Basic {auth}"))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body("grant_type=client_credentials")
             .send()
-            .await;
+            .await?;
         #[derive(Deserialize)]
         struct Response {
             access_token: String,
             expires_in: i64,
         }
-        let response: Response = result?.json().await?;
+        let response_str = response.text().await?;
+        let response = match serde_json::from_str::<Response>(&response_str) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(GerencianetError::ResponseParseError(response_str, e));
+            }
+        };
         *token = Some(GerencianetToken {
             access_token: response.access_token.to_owned(),
             expiration: Utc::now() + chrono::Duration::seconds(response.expires_in + 60),
@@ -223,19 +233,23 @@ impl Gerencianet {
         params.insert("inicio", since.to_rfc3339());
         params.insert("fim", Utc::now().to_rfc3339());
 
-        let result = self
+        let response = self
             .client
             .get(format!("{0}/v2/cob", self.url))
             .query(&params)
             .bearer_auth(access_token)
             .send()
-            .await;
+            .await?;
         #[derive(Debug, Deserialize, Serialize)]
         struct Response {
             cobs: Vec<Cobranca>,
         }
-        let response: Response = result?.json().await?;
-        Ok(response.cobs)
+        let response_str = response.text().await?;
+        let result = serde_json::from_str::<Response>(&response_str);
+        match result {
+            Ok(response) => Ok(response.cobs),
+            Err(e) => Err(GerencianetError::ResponseParseError(response_str, e)),
+        }
     }
 
     pub async fn get_charge(&self, txid: &str) -> Result<Option<Cobranca>, GerencianetError> {
@@ -247,12 +261,20 @@ impl Gerencianet {
             .bearer_auth(access_token)
             .send()
             .await?;
+
         if response.status() == 404 || response.status() == 400 {
             return Ok(None);
         }
 
-        let cob: Cobranca = response.json().await?;
-        Ok(Some(cob))
+        let response_str = response.text().await?;
+        let response = match serde_json::from_str::<Cobranca>(&response_str) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(GerencianetError::ResponseParseError(response_str, e));
+            }
+        };
+
+        Ok(Some(response))
     }
 
     pub async fn create_charge(
@@ -280,15 +302,22 @@ impl Gerencianet {
             .bearer_auth(access_token)
             .send()
             .await?;
+
         if response.status() == 200 || response.status() == 201 {
-            let cob: Cobranca = response.json().await?;
-            return Ok(cob);
+            let response_str = response.text().await?;
+            let response = match serde_json::from_str::<Cobranca>(&response_str) {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(GerencianetError::ResponseParseError(response_str, e));
+                }
+            };
+            return Ok(response);
         } else if response.status() == 409 {
             return match self.get_charge(txid).await? {
                 Some(cob) => Ok(cob),
                 None => Err(GerencianetError::ContractError(
                     "Gerencianet returned 409 to indicate that \
-                the charge already exists, but the charge could not be found"
+                    the charge already exists, but the charge could not be found"
                         .to_string(),
                 )),
             };
@@ -296,7 +325,7 @@ impl Gerencianet {
             let response_str = response.text().await?;
             match serde_json::from_str::<GerencianetResponseError>(&response_str) {
                 Ok(err) => Err(GerencianetError::ResponseError(err)),
-                Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                Err(err) => Err(GerencianetError::ResponseParseError(response_str, err)),
             }
         }
     }
@@ -309,11 +338,19 @@ impl Gerencianet {
             .bearer_auth(access_token)
             .send()
             .await?;
+
         if response.status() == 404 || response.status() == 400 {
             return Ok(None);
         }
-        let qr_code: QRCode = response.json().await?;
-        Ok(Some(qr_code))
+        let response_str = response.text().await?;
+        let response = match serde_json::from_str::<QRCode>(&response_str) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(GerencianetError::ResponseParseError(response_str, e));
+            }
+        };
+
+        Ok(Some(response))
     }
 
     pub async fn cancel_charge(&self, txid: &str) -> Result<Cobranca, GerencianetError> {
@@ -329,13 +366,19 @@ impl Gerencianet {
             .send()
             .await?;
         if response.status() == 200 || response.status() == 201 {
-            let cob: Cobranca = response.json().await?;
-            Ok(cob)
+            let response_str = response.text().await?;
+            let response = match serde_json::from_str::<Cobranca>(&response_str) {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(GerencianetError::ResponseParseError(response_str, e));
+                }
+            };
+            Ok(response)
         } else {
             let response_str = response.text().await?;
             match serde_json::from_str::<GerencianetResponseError>(&response_str) {
                 Ok(err) => Err(GerencianetError::ResponseError(err)),
-                Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                Err(err) => Err(GerencianetError::ResponseParseError(response_str, err)),
             }
         }
     }
@@ -366,7 +409,7 @@ impl Gerencianet {
             let response_str = response.text().await?;
             match serde_json::from_str::<GerencianetResponseError>(&response_str) {
                 Ok(err) => Err(GerencianetError::ResponseError(err)),
-                Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                Err(err) => Err(GerencianetError::ResponseParseError(response_str, err)),
             }
         }
     }
@@ -390,7 +433,7 @@ impl Gerencianet {
             Err(_) => {
                 return match serde_json::from_str::<GerencianetResponseError>(&response_str) {
                     Ok(err) => Err(GerencianetError::ResponseError(err)),
-                    Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                    Err(err) => Err(GerencianetError::ResponseParseError(response_str, err)),
                 }
             }
         };
@@ -414,7 +457,7 @@ impl Gerencianet {
             Err(_) => {
                 return match serde_json::from_str::<GerencianetResponseError>(&response_str) {
                     Ok(err) => Err(GerencianetError::ResponseError(err)),
-                    Err(_) => Err(GerencianetError::ResponseParseError(response_str)),
+                    Err(err) => Err(GerencianetError::ResponseParseError(response_str, err)),
                 }
             }
         };
