@@ -39,7 +39,7 @@ pub struct Horario {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Devolucoes {
     pub id: String,
-    pub rtr_id: String,
+    pub rtr_id: Option<String>,
     pub valor: String,
     pub horario: Horario,
     pub status: String,
