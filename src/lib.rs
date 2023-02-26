@@ -219,7 +219,7 @@ impl Gerencianet {
         };
         *token = Some(GerencianetToken {
             access_token: response.access_token.to_owned(),
-            expiration: Utc::now() + chrono::Duration::seconds(response.expires_in + 60),
+            expiration: Utc::now() + chrono::Duration::seconds(response.expires_in - 60),
         });
         Ok(response.access_token)
     }
